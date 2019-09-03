@@ -1,0 +1,214 @@
+<!-- Frontend for Google Map POI Scraper
+By Yunbo Chen -->
+
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Place Searches</title>
+  <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+  <meta charset="utf-8">
+  <style>
+    /* Always set the map height explicitly to define the size of the div
+       * element that contains the map. */
+    #map {
+      height: 100%;
+    }
+
+    /* Optional: Makes the sample page fill the window. */
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+  </style>
+  <script>
+    // This example requires the Places library. Include the libraries=places
+    // parameter when you first load the API. For example:
+    // <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places">
+
+    var map;
+    var service;
+    var infowindow;
+    var types = ['cafe', 'bakery', 'restaurant',
+      'meal_delivery', 'meal_takeaway',
+      'art_gallery', 'library',
+      'museum', 'school',
+      'pharmacy', 'hospital',
+      'dentist', 'doctor',
+      'physiotherapist', 'bar',
+      'movie_rental', 'movie_theater',
+      'beauty_salon', 'hair_care',
+      'laundry', 'spa', 'night_club',
+      'casino', 'book_store', 'convenience_store',
+      'clothing_store', 'department_store',
+      'shopping_mall', 'shoe_store',
+      'bicycle_store', 'electronics_store',
+      'furniture_store', 'hardware_store',
+      'home_goods_store', 'jewelry_store',
+      'liquor_store', 'pet_store', 'store',
+      'supermarket', 'gym', 'stadium',
+      'bowling_alley', 'airport',
+      'bus_station',
+      'parking',
+      'subway_station',
+      'taxi_stand',
+      'train_station',
+      'transit_station'];
+    var api_count = 0;
+
+    const sleep = (milliseconds) => {
+      return new Promise(resolve => setTimeout(resolve, milliseconds))
+    }
+    async function initMap() {
+      // map label
+      infowindow = new google.maps.InfoWindow();
+      // map center
+      var dc = new google.maps.LatLng(38.896806, -77.030832);
+      map = new google.maps.Map(
+        document.getElementById('map'), { center: dc, zoom: 15 });
+      // await further instruction
+    }
+    async function continueSearch(sw_lat, sw_lng, ne_lat, ne_lng) {
+      for (const stype of types) {
+        console.log(`searching for type ${stype}`);
+        let bound = new google.maps.LatLngBounds();
+        let sw = new google.maps.LatLng(sw_lat, sw_lng);
+        let ne = new google.maps.LatLng(ne_lat, ne_lng);
+        bound.extend(sw);
+        bound.extend(ne);
+        const retJson = await rectangSearch(bound, stype);
+        if (retJson.length != 0) {
+          var final_ret = {
+            "data": retJson,
+            "search_type": stype
+          };
+          $.ajax({
+            url: "/localize/",
+            type: "POST",
+            contentType: "application/json",
+            data: JSON.stringify(final_ret)
+          }).done(function () {
+            console.log('data written into Database');
+          });
+        } else { continue; }
+        // await sleep((retJson.length) * 1000);
+        await sleep(1000);
+      }
+      console.log(`done type looping with ${api_count} api calls`);
+      document.getElementById('soutput').innerHTML =
+        `${sw_lat},${sw_lng},${ne_lat},${ne_lng}: done`;
+    }
+
+    /* 
+     * Nearby place search core function
+     * @return p: well-formatted list of JSON
+     */
+    function rectangSearch(bound, searchType) {
+      var request = {
+        bounds: bound,
+        type: searchType,
+      };
+      service = new google.maps.places.PlacesService(map);
+      var jsonList = [];
+      var p = new Promise(function (resolve, reject) {
+        service.nearbySearch(request, async function (results, status) {
+          // console.log(`api count: ${++api_count}`);
+          if (status === google.maps.places.PlacesServiceStatus.OK) {
+            for (var i = 0; i < results.length; i++) {
+              // createMarker(results[i]);
+              var jsonified = wrapItIn(results[i]);
+              jsonList.push(jsonified);
+              // console.log(jsonified);
+            }
+            console.log(jsonList.length);
+            // console.log(results.length)
+            // map.setCenter(results[0].geometry.location);
+            resolve(jsonList);
+          }
+          else if (status == google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+            //empty result
+            await sleep(1000);
+            console.log('empty grid...');
+            resolve(jsonList);
+          }
+          else if (status == google.maps.places.PlacesServiceStatus.OVER_QUERY_LIMIT) {
+            //let's wait
+            const rest_time = 10
+            console.log("Over query limit...Trying in " + rest_time + "s");
+            await sleep(rest_time * 1000);
+            jsonList = await rectangSearch(bound, searchType);
+            resolve(jsonList);
+          }
+          else {
+            var reason = new Error(JSON.stringify(status));
+            // reject(reason);
+            console.log(`ERROR: ${reason}`);
+            jsonList = await rectangSearch(bound, searchType);
+            resolve(jsonList);
+          }
+        });
+      });
+      return p;
+    }
+
+    /**
+     * Extract relevant information from response json
+     * @return json: id, place_id, price_level, rating, name, address, lat, long, city, types
+     */
+    function wrapItIn(result) {
+      console.log(result);
+      var ret = {};
+      var attributes = ['id', 'place_id', 'price_level', 'rating', 'user_ratings_total', 'name', 'vicinity'];
+      attributes.forEach(function (attr) {
+        ret[attr] = result[attr];
+      });
+      // city code
+      var citystr = '';
+      if (result.plus_code != null && result.plus_code.compound_code != null) {
+        citystr += result.plus_code.compound_code;
+        citystr = citystr.substr(citystr.indexOf(' ') + 1); //get rid of city code
+        citystr = citystr.slice(0, -15);   //get rid of Country Name
+      }
+      ret['city'] = citystr;
+      //type
+      ret_types = [];
+      var not_included = ["point_of_interest", "establishment"];
+      var type_list = result.types;
+      type_list.forEach(function (typ) {
+        if (!not_included.includes(typ)) {
+          ret_types.push(typ);
+        }
+      });
+      ret['types'] = ret_types;
+      //lat
+      ret['lat'] = result.geometry.location.lat();
+      //long
+      ret['lng'] = result.geometry.location.lng();
+      return ret;
+    }
+
+    function createMarker(place) {
+      var marker = new google.maps.Marker({
+        map: map,
+        position: place.geometry.location
+      });
+
+      google.maps.event.addListener(marker, 'click', function () {
+        infowindow.setContent(place.name);
+        infowindow.open(map, this);
+      });
+    }
+  </script>
+  <script type=text/javascript src="{{ url_for('static', filename='jquery-3.4.1.min.js') }}"></script>
+</head>
+
+<body>
+  <div id="map"></div>
+  <div id='soutput'>0 </div>
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places&callback=initMap" async
+    defer></script>
+</body>
+
+</html>
