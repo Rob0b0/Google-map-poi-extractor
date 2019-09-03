@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Google POI Extractor
 
 ### Yunbo Chen
