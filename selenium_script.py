@@ -38,8 +38,10 @@ index = 0
 #     driver = webdriver.Chrome('./chromedriver', chrome_options=chrome_options)
     # driver.switch_to_window(driver.window_handles[0])
 
-for grid in grids:
-    print("scarping grid: {}".format(grid))
+# for grid in grids[162:]:
+while index < len(grids):
+    grid = grids[index]
+    print("scarping index: {}\ngrid : {}".format(index, grid))
     if index > 0 and index % 6 == 0:
         # restart driver to change IP
         driver.quit()
@@ -51,13 +53,15 @@ for grid in grids:
         driver.execute_script('continueSearch({},{},{},{});'.format(
             grid.sw_lat, grid.sw_lng, grid.ne_lat, grid.ne_lng
         ))
-        wait = WebDriverWait(driver, 10000)
+        wait = WebDriverWait(driver, 180)
         out = wait.until(ec.text_to_be_present_in_element((By.ID, 'soutput'), '{},{},{},{}: done'.format(
             grid.sw_lat, grid.sw_lng, grid.ne_lat, grid.ne_lng
         )))
-        index += 1
         print("done grid index {}".format(index))
-    except selenium.common.exceptions.JavascriptException:
+        index += 1
+    except TimeoutException:
+        continue
+    except JavascriptException:
         # page not loaded properly
         continue
     
